@@ -46,8 +46,11 @@ class HomeAssistantWS:
             user_data = json.loads(user_response)
             user_id = user_data.get("result", {}).get("user", {}).get("id")
             self.message_id += 1
-            message = {"id": self.message_id, "type": "config/auth_provider/homeassistant/create", "user_id": user_id, "username": username, "password": password}
+            create_user_profile = {"id": self.message_id, "type": "person/create", "name": name, "user_id": user_id,"picture":"/api/image/serve/683ba0392fe20c40b5616ffab3b876d0/512x512"}
+            await self.websocket.send(json.dumps(create_user_profile))
+            # response = json.loads(await self.websocket.recv())
             self.message_id += 1
+            message = {"id": self.message_id, "type": "config/auth_provider/homeassistant/create", "user_id": user_id, "username": username, "password": password}
             await self.websocket.send(json.dumps(message))
             response = json.loads(await self.websocket.recv())
             if "error" in response:
