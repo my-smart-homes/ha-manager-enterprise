@@ -33,7 +33,7 @@ class HomeAssistantWS:
             raise
 
     async def create_user(self, username: str, password: str, display_name: Optional[str] = None,
-                          local_only: bool = False, administrator: bool = False) -> dict:
+                          local_only: bool = False, administrator: bool = False, profile_picture_url: Optional[str] = None) -> dict:
         if not self.websocket:
             raise Exception("Not connected")
         try:
@@ -46,7 +46,9 @@ class HomeAssistantWS:
             user_data = json.loads(user_response)
             user_id = user_data.get("result", {}).get("user", {}).get("id")
             self.message_id += 1
-            create_user_profile = {"id": self.message_id, "type": "person/create", "name": name, "user_id": user_id,"picture":"/api/image/serve/683ba0392fe20c40b5616ffab3b876d0/512x512"}
+            create_user_profile = {"id": self.message_id, "type": "person/create", "name": name, "user_id": user_id}
+            if profile_picture_url:
+                create_user_profile["picture"] = profile_picture_url
             await self.websocket.send(json.dumps(create_user_profile))
             # response = json.loads(await self.websocket.recv())
             self.message_id += 1

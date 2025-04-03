@@ -1,7 +1,7 @@
 services:
-  fastapi-starter-template:
-    container_name: fastapi-starter-template
-    image: fastapi-starter-template
+  ha-manager-enterprise:
+    container_name: ha-manager-enterprise
+    image: ha-manager-enterprise
     env_file:
       - .env
     build:
@@ -14,16 +14,6 @@ services:
     depends_on:
       app_db:
         condition: service_healthy
-
-  app_redis:
-    image: redis:6.2-alpine
-    hostname: redis
-    container_name: app_redis
-    command:
-      - "redis-server"
-      - "--requirepass myStrongPassword"
-    ports:
-      - 36379:6379
 
   app_db:
     container_name: app_db

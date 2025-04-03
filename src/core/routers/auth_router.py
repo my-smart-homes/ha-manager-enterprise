@@ -1,5 +1,5 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from fastapi import APIRouter, Depends, Request, Path, HTTPException
+from fastapi import APIRouter, Depends, Request, Path, HTTPException, UploadFile, File, Form
 from src.core.ha_websocket.main import HomeAssistantWS
 from src.core.models.building import Building
 from src.database import yield_db_session
@@ -7,11 +7,38 @@ from src.exceptions import BadRequest, NotFound
 from src.responses import success
 from src.logger import get_logger
 from src.core.schemas.user_schema import BuildingInputField,BuildingUserInputField,BuildingUserUpdateField
+import os
+import uuid
+from pathlib import Path as PathLib
+from typing import Optional
+from urllib.parse import urljoin
 
 logger = get_logger(__name__)
 
 router = APIRouter()
 
+# Ensure the profile pictures directory exists
+PROFILE_PICTURES_DIR = PathLib("static/profile_pictures")
+PROFILE_PICTURES_DIR.mkdir(parents=True, exist_ok=True)
+
+async def save_profile_picture(file: UploadFile, base_url: str) -> str:
+    # Generate a unique filename
+    file_extension = os.path.splitext(file.filename)[1]
+    unique_filename = f"{uuid.uuid4()}{file_extension}"
+    file_path = PROFILE_PICTURES_DIR / unique_filename
+    
+    # Save the file
+    try:
+        contents = await file.read()
+        with open(file_path, "wb") as f:
+            f.write(contents)
+        # Create the full URL using the base URL
+        relative_path = f"/static/profile_pictures/{unique_filename}"
+        full_url = urljoin(base_url, relative_path)
+        return full_url
+    except Exception as e:
+        logger.error(f"Error saving profile picture: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save profile picture")
 
 @router.get('/building/list', description="List All Buildings")
 async def list_buildings(
@@ -79,28 +106,37 @@ async def delete_building(
 
 @router.post("/building/create-user/{building_id}", description="Create User via WebSocket")
 async def create_user_via_ws(
-    body: BuildingUserInputField,  # No default, this is fine here
+    request: Request,
     building_id: int = Path(..., description="The ID of the building"),
+    username: str = Form(...),
+    password: str = Form(...),
+    display_name: Optional[str] = Form(None),
+    local_access_only: Optional[bool] = Form(False),
+    administrator: Optional[bool] = Form(False),
+    profile_picture: Optional[UploadFile] = File(None),
     db_session: AsyncSession = Depends(yield_db_session)
 ):
-
-    print(building_id)
     building = await Building.get(db_session, building_id)
-    print(building.building_url,building.access_token,'---------')
     if not building:
         raise HTTPException(status_code=404, detail="Building not found.")
 
-    print(body)
+    profile_picture_url = None
+    if profile_picture:
+        # Get the base URL from the request
+        base_url = str(request.base_url)
+        profile_picture_url = await save_profile_picture(profile_picture, base_url)
+
     client = HomeAssistantWS(domain=building.building_url, access_token=building.access_token)
     
     try:
         await client.connect()
         response = await client.create_user(
-            username=body.username,
-            password=body.password,
-            display_name=body.display_name,
-            local_only=body.local_access_only if body.local_access_only is not None else False,
-            administrator=body.administrator if body.administrator is not None else False
+            username=username,
+            password=password,
+            display_name=display_name,
+            local_only=local_access_only,
+            administrator=administrator,
+            profile_picture_url=profile_picture_url
         )
         return success(response)
     except Exception as e:
@@ -109,6 +145,7 @@ async def create_user_via_ws(
     finally:
         await client.close()
         logger.info("WebSocket connection closed")
+
 @router.put("/building/edit-user/{building_id}", description="Edit User via WebSocket")
 async def edit_user_via_ws(
     body: BuildingUserUpdateField,
@@ -134,6 +171,7 @@ async def edit_user_via_ws(
     finally:
         await client.close()
         logger.info("WebSocket connection closed")
+
 @router.delete("/building/delete-user/{building_id}/{user_id}", description="Delete User via WebSocket")
 async def delete_user_via_ws(
     building_id: int = Path(..., description="The ID of the building"),
@@ -154,6 +192,7 @@ async def delete_user_via_ws(
     finally:
         await client.close()
         logger.info("WebSocket connection closed")
+
 @router.get("/building/users", description="List all users from each building")
 async def list_building_users(db_session: AsyncSession = Depends(yield_db_session)):
     buildings = await Building.list(db_session)
