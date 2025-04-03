@@ -5,6 +5,7 @@ import sentry_sdk
 from fastapi import FastAPI, status
 from fastapi.exceptions import HTTPException, RequestValidationError
 from starlette.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from src import logger
 from src.config import app_configs, settings
@@ -44,6 +45,9 @@ app.add_middleware(
     allow_methods=("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"),
     allow_headers=settings.CORS_HEADERS,
 )
+
+# Mount the static files directory
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 if settings.ENVIRONMENT.is_deployed:
     sentry_sdk.init(

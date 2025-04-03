@@ -1,4 +1,5 @@
 from typing import Optional
+from fastapi import UploadFile, File
 from src.core.schemas.base_schema import CustomModel
 
 
@@ -29,15 +30,6 @@ class BuildingInputField(CustomModel):
         from_attributes = True
         exclude_unset = True
 
-class BuildingInputField(CustomModel):
-    name: Optional[str] = ''
-    access_token: Optional[str] = ''
-    building_url: Optional[str] = ''
-
-    class Config:
-        exclude_defaults = True
-        from_attributes = True
-        exclude_unset = True
 
 class BuildingUserInputField(CustomModel):
     username: str
@@ -50,6 +42,7 @@ class BuildingUserInputField(CustomModel):
         exclude_defaults = True
         from_attributes = True
         exclude_unset = True
+
 
 class BuildingUserUpdateField(CustomModel):
     group_ids: Optional[list[str]] = None
