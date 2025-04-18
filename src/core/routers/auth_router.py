@@ -162,7 +162,10 @@ async def edit_user_via_ws(
             display_name=body.display_name,
             local_only=body.local_access_only if body.local_access_only is not None else False,
             user_id=body.user_id,
-            group_ids=body.group_ids
+            group_ids=body.group_ids,
+            user_name=body.user_name,
+            new_password=body.new_password
+            # profile_picture_url: Optional[str] = None
         )
         return success(response)
     except Exception as e:

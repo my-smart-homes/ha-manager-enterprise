@@ -47,6 +47,11 @@ class BuildingUserInputField(CustomModel):
 class BuildingUserUpdateField(CustomModel):
     group_ids: Optional[list[str]] = None
     display_name: Optional[str] = None
+    user_name: Optional[str] = None
+    current_password: Optional[str] = None
+    new_password: Optional[str] = None
+    profile_picture_url: Optional[str] = None
+
     local_access_only: Optional[bool] = False
     administrator: Optional[bool] = False
     user_id: Optional[str] = None
