@@ -63,38 +63,178 @@ class HomeAssistantWS:
             raise
     async def list_persons(self) -> dict:
         """
-        Connects to the Home Assistant websocket to request a list of persons.
+        Connects to the Home Assistant websocket to request a list of users
+        (config/auth/list) and then appends each user's profile picture
+        from the person registry (config/person/list).
         """
         if not self.websocket:
             raise Exception("Not connected")
+
         try:
-            # Construct the person/list message.
-            message = {"id": self.message_id, "type": "config/auth/list"}
+            # 1) Get the raw user list
+            auth_msg = {
+                "id": self.message_id,
+                "type": "config/auth/list",
+            }
             self.message_id += 1
-            await self.websocket.send(json.dumps(message))
-            # Wait for and return the response.
-            response = json.loads(await self.websocket.recv())
-            return response
+            await self.websocket.send(json.dumps(auth_msg))
+            auth_resp = json.loads(await self.websocket.recv())
+            if not auth_resp.get("success", False):
+                raise Exception(f"auth/list failed: {auth_resp}")
+
+            users = auth_resp["result"]
+
+            # 2) Get the person registry (which includes `picture`)
+            person_msg = {
+                "id": self.message_id,
+                "type": "person/list",
+            }
+            self.message_id += 1
+            await self.websocket.send(json.dumps(person_msg))
+            person_resp = json.loads(await self.websocket.recv())
+            if not person_resp.get("success", False):
+                raise Exception(f"person/list failed: {person_resp}")
+
+            persons = person_resp["result"]["storage"]
+            # 3) Build a map user_id → picture
+            picture_map = {
+                person["user_id"]: person.get("picture")
+                for person in persons
+                if person.get("user_id")
+            }
+
+            # 4) Append `picture` onto each user entry
+            for user in users:
+                user_id = user.get("id")
+                user["picture"] = picture_map.get(user_id)
+
+            # Return the enriched auth/list response
+            return {
+                **auth_resp,
+                "result": users,
+            }
+
         except Exception as e:
-            logger.error(f"Failed to list persons: {e}")
+            logger.error(f"Failed to list persons with pictures: {e}")
             raise
-    async def update_person(self, user_id: str, display_name: str, group_ids: list[str],local_only:bool) -> dict:
+    
+
+    async def update_person(
+        self,
+        user_id: str,
+        display_name: str,
+        group_ids: list[str],
+        local_only: bool,
+        user_name: str = None,
+        new_password: str = None,
+    ) -> dict:
         """
-        Connects to the Home Assistant websocket to update a person.
+        Update a person's display name, group, and optionally their username and password.
+
+        Parameters:
+        user_id: The Home Assistant user ID to update.
+        display_name: New display name.
+        group_ids: List of group IDs this user should belong to.
+        local_only: Whether the account is local only.
+        username: Optional new username.
+        password: Optional new password.
+
+        Returns:
+        A dict containing responses from:
+            - config/auth/update
+            - person/update
+            - change_password (if applicable)
         """
         if not self.websocket:
             raise Exception("Not connected")
+
         try:
-            # Construct the person/update message.
-            message = {"id": self.message_id, "type": "config/auth/update", "user_id": user_id, "name": display_name,"local_only":local_only, "group_ids": group_ids}
+            # Step 1: Update auth user (without username or password)
+            auth_message = {
+                "id": self.message_id,
+                "type": "config/auth/update",
+                "user_id": user_id,
+                "name": display_name,
+                "local_only": local_only,
+                "group_ids": group_ids
+            }
+            print("Sending auth update:", auth_message)
             self.message_id += 1
-            await self.websocket.send(json.dumps(message))
-            # Wait for and return the response.
+            await self.websocket.send(json.dumps(auth_message))
             response = json.loads(await self.websocket.recv())
+            print("Auth update response:", response)
+
+            # Step 2 (optional): Update username
+            if user_name:
+                change_username_msg = {
+                    "id": self.message_id,
+                    "type": "config/auth_provider/homeassistant/admin_change_username",
+                    "user_id": user_id,
+                    "username": user_name
+                }
+                print("Sending username update:", change_username_msg)
+                self.message_id += 1
+                await self.websocket.send(json.dumps(change_username_msg))
+                response = json.loads(await self.websocket.recv())
+                print("Username update response:", response)
+
+            # Step 3 (optional): Update password
+            if new_password:
+                change_password_msg = {
+                    "id": self.message_id,
+                    "type": "config/auth_provider/homeassistant/admin_change_password",
+                    "user_id": user_id,
+                    "password": new_password
+                }
+                print("Sending password update:", change_password_msg)
+                self.message_id += 1
+                await self.websocket.send(json.dumps(change_password_msg))
+                response = json.loads(await self.websocket.recv())
+                print("Password update response:", response)
+
+            # Step 4: Get persons to find person_id
+            get_persons_message = {
+                "id": self.message_id,
+                "type": "person/list"
+            }
+            self.message_id += 1
+            await self.websocket.send(json.dumps(get_persons_message))
+            persons_response = json.loads(await self.websocket.recv())
+            print("Persons response:", persons_response)
+
+            person_id = None
+            persons_result = persons_response.get("result", {})
+            storage = persons_result.get("storage", [])
+            for person in storage:
+                if person.get("user_id") == user_id:
+                    person_id = person.get("id")
+                    break
+
+            if not person_id:
+                raise Exception(f"No person linked with user_id {user_id}")
+
+            # Step 5: Update the person
+            update_person_message = {
+                "id": self.message_id,
+                "type": "person/update",
+                "person_id": person_id,
+                "user_id": user_id,
+                "name": display_name
+            }
+            print("Sending person update:", update_person_message)
+            self.message_id += 1
+            await self.websocket.send(json.dumps(update_person_message))
+            response = json.loads(await self.websocket.recv())
+            print("Person update response:", response)
+
             return response
+
         except Exception as e:
             logger.error(f"Failed to update person: {e}")
             raise
+
+
+
     async def delete_person(self, user_id: str) -> dict:
         """
         Connects to the Home Assistant websocket to delete a person.
