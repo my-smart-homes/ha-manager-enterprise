@@ -127,6 +127,7 @@ class HomeAssistantWS:
         local_only: bool,
         user_name: str = None,
         new_password: str = None,
+        profile_picture_url: Optional[str] = None
     ) -> dict:
         """
         Update a person's display name, group, and optionally their username and password.
@@ -166,17 +167,22 @@ class HomeAssistantWS:
 
             # Step 2 (optional): Update username
             if user_name:
-                change_username_msg = {
-                    "id": self.message_id,
-                    "type": "config/auth_provider/homeassistant/admin_change_username",
-                    "user_id": user_id,
-                    "username": user_name
-                }
-                print("Sending username update:", change_username_msg)
-                self.message_id += 1
-                await self.websocket.send(json.dumps(change_username_msg))
-                response = json.loads(await self.websocket.recv())
-                print("Username update response:", response)
+                try:
+
+                    change_username_msg = {
+                        "id": self.message_id,
+                        "type": "config/auth_provider/homeassistant/admin_change_username",
+                        "user_id": user_id,
+                        "username": user_name
+                    }
+                    print("Sending username update:", change_username_msg)
+                    self.message_id += 1
+                    await self.websocket.send(json.dumps(change_username_msg))
+                    response = json.loads(await self.websocket.recv())
+                    print("Username update response:", response)
+                except Exception as e:
+                    print(f"Failed to update username: {e}")
+                    raise
 
             # Step 3 (optional): Update password
             if new_password:
@@ -193,25 +199,7 @@ class HomeAssistantWS:
                 print("Password update response:", response)
 
             # Step 4: Get persons to find person_id
-            get_persons_message = {
-                "id": self.message_id,
-                "type": "person/list"
-            }
-            self.message_id += 1
-            await self.websocket.send(json.dumps(get_persons_message))
-            persons_response = json.loads(await self.websocket.recv())
-            print("Persons response:", persons_response)
-
-            person_id = None
-            persons_result = persons_response.get("result", {})
-            storage = persons_result.get("storage", [])
-            for person in storage:
-                if person.get("user_id") == user_id:
-                    person_id = person.get("id")
-                    break
-
-            if not person_id:
-                raise Exception(f"No person linked with user_id {user_id}")
+            person_id = await self.get_person_id(user_id)
 
             # Step 5: Update the person
             update_person_message = {
@@ -221,6 +209,9 @@ class HomeAssistantWS:
                 "user_id": user_id,
                 "name": display_name
             }
+            if profile_picture_url:
+                update_person_message["picture"] = profile_picture_url
+                
             print("Sending person update:", update_person_message)
             self.message_id += 1
             await self.websocket.send(json.dumps(update_person_message))
@@ -242,16 +233,57 @@ class HomeAssistantWS:
         if not self.websocket:
             raise Exception("Not connected")
         try:
-            # Construct the person/delete message.
+            # construct the person/delete message.
+            person_id = await self.get_person_id(user_id)
+            message = {"id": self.message_id, "type": "person/delete", "person_id": person_id}
+            self.message_id += 1
+            await self.websocket.send(json.dumps(message))
+            # Wait for and return the response.
+            response = json.loads(await self.websocket.recv())
+            # Construct the config/delete message.
             message = {"id": self.message_id, "type": "config/auth/delete", "user_id": user_id}
             self.message_id += 1
             await self.websocket.send(json.dumps(message))
             # Wait for and return the response.
             response = json.loads(await self.websocket.recv())
+            
+            if "error" in response:
+                raise Exception(f"Error deleting person: {response['error']}")
             return response
         except Exception as e:
             logger.error(f"Failed to delete person: {e}")
             raise
+
+    async def get_person_id(self, user_id: str) -> str:
+        """
+        Retrieves the person_id associated with a given user_id.
+
+        Parameters:
+        user_id: The Home Assistant user ID.
+
+        Returns:
+        The person_id associated with the user_id.
+
+        Raises:
+        Exception if no person is linked with the given user_id.
+        """
+        get_persons_message = {
+            "id": self.message_id,
+            "type": "person/list"
+        }
+        self.message_id += 1
+        await self.websocket.send(json.dumps(get_persons_message))
+        persons_response = json.loads(await self.websocket.recv())
+        print("Persons response:", persons_response)
+
+        persons_result = persons_response.get("result", {})
+        storage = persons_result.get("storage", [])
+        for person in storage:
+            if person.get("user_id") == user_id:
+                return person.get("id")
+
+        raise Exception(f"No person linked with user_id {user_id}")
+
     async def close(self) -> None:
         if self.websocket:
             await self.websocket.close()

@@ -148,23 +148,38 @@ async def create_user_via_ws(
 
 @router.put("/building/edit-user/{building_id}", description="Edit User via WebSocket")
 async def edit_user_via_ws(
-    body: BuildingUserUpdateField,
+    request: Request,
     building_id: int = Path(..., description="The ID of the building"),
+    user_id: str = Form(...),
+    user_name: str = Form(...),
+    new_password: Optional[str] = Form(None),
+    display_name: Optional[str] = Form(None),
+    local_access_only: Optional[bool] = Form(False),
+    group_ids: Optional[str] = Form(None),
+    profile_picture: Optional[UploadFile] = File(None),
     db_session: AsyncSession = Depends(yield_db_session)
 ):
     building = await Building.get(db_session, building_id)
     if not building:
         raise HTTPException(status_code=404, detail="Building not found.")
+    
+    profile_picture_url = None
+    if profile_picture:
+        # Get the base URL from the request
+        base_url = str(request.base_url)
+        profile_picture_url = await save_profile_picture(profile_picture, base_url)
+
     client = HomeAssistantWS(domain=building.building_url, access_token=building.access_token)
     try:
         await client.connect()
         response = await client.update_person(
-            display_name=body.display_name,
-            local_only=body.local_access_only if body.local_access_only is not None else False,
-            user_id=body.user_id,
-            group_ids=body.group_ids,
-            user_name=body.user_name,
-            new_password=body.new_password
+            display_name=display_name,
+            local_only=local_access_only if local_access_only is not None else False,
+            user_id=user_id,
+            group_ids=[group_ids] if group_ids else None,
+            user_name=user_name,
+            new_password=new_password,
+            profile_picture_url=profile_picture_url,
             # profile_picture_url: Optional[str] = None
         )
         return success(response)
